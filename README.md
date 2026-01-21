@@ -33,6 +33,22 @@ The experiments for the value- and temp-based Rare Time and Rare Feature setting
 
 Our masking functions and perturbations are implemented in `attribution.mask_conti.py` and `attribution.perturbation_conti.py`.
 
+Citation
+----------
+
+If you use this code in your research, please consider citing:
+
+```bibtex
+@inproceedings{
+moebus2025contimask,
+title={Contimask: Explaining Irregular Time Series via Perturbations in Continuous Time},
+author={Max Moebus and Bj{\"o}rn Braun and Christian Holz},
+booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
+year={2025},
+url={https://openreview.net/forum?id=Jzr9VOiJYd}
+}
+```
+
 Credits
 ----------
 This repository is based largely on the structure of the [Dynamask](https://github.com/JonathanCrabbe/Dynamask) and [ExtremalMask](https://github.com/josephenguehard/time_interpret) repositories.
