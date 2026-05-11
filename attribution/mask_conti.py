@@ -1,21 +1,20 @@
+import math
+from typing import Callable, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as Func
 import torch.nn.init as init
-import math
 import tqdm
+from evotorch.algorithms import PGPE
+from evotorch.neuroevolution import NEProblem
 from torch.optim.optimizer import Optimizer as TorchOptimizer
 
-from evotorch.neuroevolution import NEProblem
-from evotorch.algorithms import PGPE
-
-from typing import Callable, Union
-
 from attribution.perturbation_conti import (
-    Perturbation_continuous,
     Deletion,
     MaskFunction,
     MaskTensor,
+    Perturbation_continuous,
 )
 
 

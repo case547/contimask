@@ -1,15 +1,15 @@
+import math
+import operator
 from abc import ABC, abstractmethod
+from functools import reduce
+from typing import Tuple
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as Func
 from torch.distributions import Bernoulli
-import matplotlib.pyplot as plt
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from functools import reduce
-from typing import Tuple
-import operator
-import math
 
 
 class MaskFunction(nn.Module):
