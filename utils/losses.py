@@ -49,9 +49,9 @@ def mse_multiple(Y, Y_target):
         return torch.mean((Y - Y_target) ** 2, dim=[0, 2, 3])
     else:
         raise ValueError("Y should be a 3D or 4D tensor")
-    
-def time_regularizer(pert_mask, data_mask):
 
+
+def time_regularizer(pert_mask, data_mask):
     """Computes the time regularizer for pert_mask in the irregular data setting."""
     assert pert_mask.shape == data_mask.shape
     assert data_mask.min() >= 0

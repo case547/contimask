@@ -11,15 +11,17 @@ from typing import Tuple
 import operator
 import math
 
+
 class MaskFunction(nn.Module):
     """
     Base class for mask functions.
-    
+
     Attributes:
         hidden_dim (int): Hidden dimensionality of the MLP.
         features (int): Number of output mask channels.
         init_bias (float): Initial bias for the last layer.
     """
+
     def __init__(self, hidden_dim=32, features=3, init_bias=-0):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -28,6 +30,7 @@ class MaskFunction(nn.Module):
 
     def forward(self, t, hard_sample=False):
         raise NotImplementedError("Subclasses should implement this method.")
+
 
 # 3) Mask network: maps t→logits
 class MaskFunctionMLP(MaskFunction):
@@ -38,7 +41,7 @@ class MaskFunctionMLP(MaskFunction):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, features)
+            nn.Linear(hidden_dim, features),
         )
 
     def forward(self, t, hard_sample=False):
@@ -51,12 +54,13 @@ class MaskFunctionMLP(MaskFunction):
             B = 1
             t = t.view(1, T)
 
-        logits = self.mlp(t.contiguous().view(B*T, 1)).view(B, T, -1)
+        logits = self.mlp(t.contiguous().view(B * T, 1)).view(B, T, -1)
 
         if hard_sample:
             return (logits > 0.5).float()
         else:
             return logits
+
 
 class MaskFunctionFourier(MaskFunction):
     def __init__(self, hidden_dim=64, features=3, init_bias=0, L=10):
@@ -69,11 +73,11 @@ class MaskFunctionFourier(MaskFunction):
         self.L = L
         # build the MLP
         self.net = nn.Sequential(
-            nn.Linear(2*L, hidden_dim),
+            nn.Linear(2 * L, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, features)
+            nn.Linear(hidden_dim, features),
         )
 
     def forward(self, t):
@@ -89,15 +93,16 @@ class MaskFunctionFourier(MaskFunction):
             t = t.view(1, T)
         # build frequency vector [2π·2⁰, 2π·2¹, …, 2π·2⁽ᴸ⁻¹⁾]
         device = t.device
-        freqs = 2*math.pi * (2.0 ** torch.arange(self.L, device=device))
+        freqs = 2 * math.pi * (2.0 ** torch.arange(self.L, device=device))
         # expand t and multiply
         # t_lin: (B*T, L)
-        t_lin = (t.view(-1,1) * freqs[None,:])
+        t_lin = t.view(-1, 1) * freqs[None, :]
         # concat sin and cos → (B*T, 2L)
         fourier_feats = torch.cat([t_lin.sin(), t_lin.cos()], dim=-1)
         # feed through MLP
-        out = self.net(fourier_feats)         # (B*T, features)
+        out = self.net(fourier_feats)  # (B*T, features)
         return out.view(B, T, -1)
+
 
 class Sine(nn.Module):
     def __init__(self, w0=30.0):
@@ -107,6 +112,7 @@ class Sine(nn.Module):
     def forward(self, x):
         # x: (..., 1)
         return torch.sin(self.w0 * x)
+
 
 class MaskFunctionSine(MaskFunction):
     def __init__(self, hidden_dim=64, features=3, init_bias=0, w0=30.0):
@@ -121,7 +127,7 @@ class MaskFunctionSine(MaskFunction):
             Sine(w0),
             nn.Linear(hidden_dim, hidden_dim),
             Sine(w0),
-            nn.Linear(hidden_dim, features)
+            nn.Linear(hidden_dim, features),
         )
 
     def forward(self, t):
@@ -135,9 +141,10 @@ class MaskFunctionSine(MaskFunction):
             T = t.shape[0]
             B = 1
             t = t.view(1, T)
-        x = t.view(B*T, 1)
-        out = self.net(x)                     # (B*T, features)
+        x = t.view(B * T, 1)
+        out = self.net(x)  # (B*T, features)
         return out.view(B, T, -1)
+
 
 class MaskFunctionHaar(MaskFunction):
     def __init__(self, features=3, hidden_dim=8, init_bias=0, levels=10):
@@ -151,28 +158,34 @@ class MaskFunctionHaar(MaskFunction):
         num_basis = sum(2**j for j in range(levels))
 
         # build lists of left/right half-interval boundaries
-        starts_left  = []
-        ends_left    = []
+        starts_left = []
+        ends_left = []
         starts_right = []
-        ends_right   = []
+        ends_right = []
         for j in range(levels):
             subdiv = 2**j
-            width  = 1.0 / subdiv
-            half   = width / 2.0
+            width = 1.0 / subdiv
+            half = width / 2.0
             for k in range(subdiv):
-                a = k * width        # interval start
-                b = a + half         # midpoint
-                d = a + width        # interval end
+                a = k * width  # interval start
+                b = a + half  # midpoint
+                d = a + width  # interval end
                 starts_left.append(a)
                 ends_left.append(b)
                 starts_right.append(b)
                 ends_right.append(d)
 
         # register as fixed buffers (so they move to .cuda() with the model, etc.)
-        self.register_buffer('starts_left',  torch.tensor(starts_left, dtype=torch.float32))
-        self.register_buffer('ends_left',    torch.tensor(ends_left,   dtype=torch.float32))
-        self.register_buffer('starts_right', torch.tensor(starts_right,dtype=torch.float32))
-        self.register_buffer('ends_right',   torch.tensor(ends_right,  dtype=torch.float32))
+        self.register_buffer(
+            "starts_left", torch.tensor(starts_left, dtype=torch.float32)
+        )
+        self.register_buffer("ends_left", torch.tensor(ends_left, dtype=torch.float32))
+        self.register_buffer(
+            "starts_right", torch.tensor(starts_right, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "ends_right", torch.tensor(ends_right, dtype=torch.float32)
+        )
 
         # simple MLP head
         self.net = nn.Sequential(
@@ -198,15 +211,20 @@ class MaskFunctionHaar(MaskFunction):
         t_flat = t.view(-1)
 
         # do one big broadcasted comparison:
-        ml = (t_flat.unsqueeze(1) >= self.starts_left)  & (t_flat.unsqueeze(1) < self.ends_left)
-        mr = (t_flat.unsqueeze(1) >= self.starts_right) & (t_flat.unsqueeze(1) < self.ends_right)
+        ml = (t_flat.unsqueeze(1) >= self.starts_left) & (
+            t_flat.unsqueeze(1) < self.ends_left
+        )
+        mr = (t_flat.unsqueeze(1) >= self.starts_right) & (
+            t_flat.unsqueeze(1) < self.ends_right
+        )
 
         # Haar feature = +1 on left half, -1 on right half, 0 elsewhere
-        H = ml.float() - mr.float()   # shape (B*T, num_basis)
+        H = ml.float() - mr.float()  # shape (B*T, num_basis)
 
         # MLP & reshape
-        out = self.net(H)             # (B*T, features)
-        return out.view(B, T, -1)     # (B, T, features)
+        out = self.net(H)  # (B*T, features)
+        return out.view(B, T, -1)  # (B, T, features)
+
 
 class MaskTensor(nn.Module):
     def __init__(self, data_tensor: torch.Tensor, init_value=0.5, learn=True):
@@ -215,12 +233,14 @@ class MaskTensor(nn.Module):
         if not learn:
             self.tensor = data_tensor
         else:
-            self.tensor = nn.Parameter(torch.ones_like(data_tensor)*init_value)
+            self.tensor = nn.Parameter(torch.ones_like(data_tensor) * init_value)
 
     def forward(self, t, hard_sample=False):
         # hard_sample is mainly fr consistency with MaskFunction, yet to use it
         if t.shape[-1] != self.tensor.shape[-2]:
-            raise Warning(f"Input tensor shape {t.shape} does not match mask tensor shape {self.tensor.shape}")
+            raise Warning(
+                f"Input tensor shape {t.shape} does not match mask tensor shape {self.tensor.shape}"
+            )
         if hard_sample:
             if not self.learn:
                 return (self.tensor > 0.5).float()
@@ -240,9 +260,10 @@ def sample_hard_concrete(logits, temperature):
     y_hard = (y_soft > 0.5).int()
     return y_hard.detach() - y_soft.detach() + y_soft
 
+
 class Perturbation:
     """Base class for perturbation in continuous time"""
-    
+
     @abstractmethod
     def __init__(self, device, eps=1.0e-7):
         self.mask_function = None
@@ -256,10 +277,11 @@ class Perturbation:
     @abstractmethod
     def apply_multiple(self, t, X, data_mask, mask_function):
         pass
+
 
 class Perturbation_continuous:
     """Base class for perturbation in continuous time"""
-    
+
     @abstractmethod
     def __init__(self, device, eps=1.0e-7):
         self.mask_function = None
@@ -274,28 +296,32 @@ class Perturbation_continuous:
     def apply_multiple(self, t, X, data_mask, mask_function):
         pass
 
+
 class Deletion(Perturbation_continuous):
     """This class allows to create and apply deletion perturbations on inputs based on masks.
-    
+
     Attributes:
         eps (float): Small number used for numerical stability.
         device: Device on which the tensor operations are executed.
     """
+
     def __init__(self, device, eps=1.0e-7):
         super().__init__(eps=eps, device=device)
 
     def adapt_data_mask(self, t, X, data_mask, deletion_mask):
-        
+
         data_mask = data_mask * deletion_mask
         X[~deletion_mask.bool()] = torch.nan
 
         return t, X, data_mask
-        
-    def delete_and_pad_all(self,
-                           t: torch.Tensor,
-                           X: torch.Tensor,
-                           tensor2: torch.Tensor,
-                           deletion_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    def delete_and_pad_all(
+        self,
+        t: torch.Tensor,
+        X: torch.Tensor,
+        tensor2: torch.Tensor,
+        deletion_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Remove time‑steps where deletion_mask is all zero (across features),
         then forward‑fill with the last kept row so that each output has the
@@ -314,9 +340,11 @@ class Deletion(Perturbation_continuous):
         """
         # 1) unify t’s last dim
         if t.dim() == X.dim() - 1:
-            t = t.unsqueeze(-1)   # now (..., T, 1)
+            t = t.unsqueeze(-1)  # now (..., T, 1)
         if t.shape[:-2] != X.shape[:-2] or t.shape[-2] != X.shape[-2]:
-            raise ValueError("t must match X in all dims except its last, which may be 1")
+            raise ValueError(
+                "t must match X in all dims except its last, which may be 1"
+            )
 
         # 2) flatten leading batch dims → (N, T, Fi)
         *batch_shape, T, F = X.shape
@@ -333,51 +361,49 @@ class Deletion(Perturbation_continuous):
         Mf = deletion_mask.view(N, T, deletion_mask.shape[-1])
 
         # 3) find which rows survive
-        keep_any = Mf.any(dim=2)        # (N, T)
-        lengths = keep_any.sum(dim=1)   # (N,)
+        keep_any = Mf.any(dim=2)  # (N, T)
+        lengths = keep_any.sum(dim=1)  # (N,)
 
         # 4) argsort the drop‐flag so kept rows bubble to front (stable → keeps their order)
-        drop_flag  = (~keep_any).long()           # 0 for keep, 1 for drop
+        drop_flag = (~keep_any).long()  # 0 for keep, 1 for drop
         sorted_idx = torch.argsort(drop_flag, dim=1, stable=True)  # (N, T)
-        idx_exp    = sorted_idx.unsqueeze(2)      # (N, T, 1)
+        idx_exp = sorted_idx.unsqueeze(2)  # (N, T, 1)
 
         outs = []
         for inp_f in (Xf, Yf, tf):
             Fi = inp_f.shape[2]
-            idx_e = idx_exp.expand(-1, -1, Fi)       # (N, T, Fi)
+            idx_e = idx_exp.expand(-1, -1, Fi)  # (N, T, Fi)
 
             # 5) reorder so first `lengths[i]` rows are the surviving ones
-            reordered = inp_f.gather(1, idx_e)       # (N, T, Fi)
+            reordered = inp_f.gather(1, idx_e)  # (N, T, Fi)
 
             # 6) forward‑fill the tail with the last kept row
-            last_idx     = (lengths - 1).clamp(min=0)        # (N,)
-            last_idx_e   = last_idx[:, None].expand(-1, T)  # (N, T)
-            last_idx_e3  = last_idx_e.unsqueeze(2).expand(-1, -1, Fi)
-            last_vals    = reordered.gather(1, last_idx_e3) # (N, T, Fi)
+            last_idx = (lengths - 1).clamp(min=0)  # (N,)
+            last_idx_e = last_idx[:, None].expand(-1, T)  # (N, T)
+            last_idx_e3 = last_idx_e.unsqueeze(2).expand(-1, -1, Fi)
+            last_vals = reordered.gather(1, last_idx_e3)  # (N, T, Fi)
 
-            ar = torch.arange(T, device=X.device)[None, :]   # (1, T)
-            pad_mask = ar >= lengths[:, None]               # (N, T)
+            ar = torch.arange(T, device=X.device)[None, :]  # (1, T)
+            pad_mask = ar >= lengths[:, None]  # (N, T)
             pad_mask = pad_mask.unsqueeze(2).expand(-1, -1, Fi)
 
             out_f = torch.where(pad_mask, last_vals, reordered)  # (N, T, Fi)
             outs.append(out_f)
 
         # 7) reshape back to original batch dims
-        X_out, Y_out, t_out = [
-            out.view(*batch_shape, T, out.shape[-1]) for out in outs
-        ]
+        X_out, Y_out, t_out = [out.view(*batch_shape, T, out.shape[-1]) for out in outs]
 
         # 8) restore t’s original shape
         if t_out.shape[-1] == 1 and t.dim() == X.dim() - 1:
             t_out = t_out.squeeze(-1)
 
         return t_out.squeeze(-1), X_out, Y_out
-    
+
     def delete_and_fill_tail(
         t: torch.Tensor,
         X: torch.Tensor,
         data_mask: torch.Tensor,
-        deletion_mask: torch.Tensor
+        deletion_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Delete rows where all features are NaN, then append copies of the last valid row
@@ -399,9 +425,9 @@ class Deletion(Perturbation_continuous):
                 - mask_out: torch.Tensor of shape (..., T, F), with tail rows zeroed
         """
 
-        print('deleting and padding the tail')
+        print("deleting and padding the tail")
         # Apply deletion mask
-        X = X.masked_fill(deletion_mask == 0, float('nan'))
+        X = X.masked_fill(deletion_mask == 0, float("nan"))
         data_mask = data_mask.masked_fill(deletion_mask == 0, 0)
 
         # Flatten batch dims
@@ -413,30 +439,34 @@ class Deletion(Perturbation_continuous):
         mask_flat = data_mask.reshape(B, T, F)
 
         # Identify fully-missing rows
-        full_missing = torch.all(torch.isnan(X_flat), dim=-1).to(torch.int64)  # [B, T], 1 if missing
+        full_missing = torch.all(torch.isnan(X_flat), dim=-1).to(
+            torch.int64
+        )  # [B, T], 1 if missing
 
         # Stable sort requires PyTorch >=1.13; this groups valid(0) before missing(1)
         idx_sort = torch.argsort(full_missing, dim=1)  # [B, T]
 
         # Gather sorted sequences
         idx_sort_exp = idx_sort.unsqueeze(-1).expand(-1, -1, F)
-        X_sorted = torch.gather(X_flat, 1, idx_sort_exp)    # [B, T, F]
-        t_sorted = torch.gather(t_flat, 1, idx_sort)        # [B, T]
+        X_sorted = torch.gather(X_flat, 1, idx_sort_exp)  # [B, T, F]
+        t_sorted = torch.gather(t_flat, 1, idx_sort)  # [B, T]
         mask_sorted = torch.gather(mask_flat, 1, idx_sort_exp)
 
         # Count valid entries per batch
-        valid_counts = (full_missing == 0).sum(dim=1)      # [B]
+        valid_counts = (full_missing == 0).sum(dim=1)  # [B]
 
         # Prepare tail fill
         # last valid per batch: at position valid_counts[b]-1
         last_idx = (valid_counts - 1).clamp(min=0)
         # gather last valid rows
-        last_X = X_sorted[torch.arange(B), last_idx]       # [B, F]
-        last_t = t_sorted[torch.arange(B), last_idx]       # [B]
+        last_X = X_sorted[torch.arange(B), last_idx]  # [B, F]
+        last_t = t_sorted[torch.arange(B), last_idx]  # [B]
 
         # Create mask for tail positions
-        positions = torch.arange(T, device=X.device).unsqueeze(0).expand(B, -1)  # [B, T]
-        tail_mask = positions >= valid_counts.unsqueeze(1)                     # [B, T]
+        positions = (
+            torch.arange(T, device=X.device).unsqueeze(0).expand(B, -1)
+        )  # [B, T]
+        tail_mask = positions >= valid_counts.unsqueeze(1)  # [B, T]
         tail_mask_exp = tail_mask.unsqueeze(-1).expand(-1, -1, F)
 
         # Expand last valid to full shape
@@ -456,23 +486,22 @@ class Deletion(Perturbation_continuous):
 
         return t_out, X_out, mask_out
 
-
     # TODO: Figure out what do to with K here
     def apply(self, t, X, data_mask, mask, K=1, temp=0.8, delete_and_pad=False):
         """
         Apply the deletion perturbation to a single time series.
-        
+
         Parameters:
             t (torch.Tensor): 1D tensor of time stamps, shape (B, T,).
             X (torch.Tensor): Input data, shape (B, T, n_features).
             data_mask (torch.Tensor): Binary mask of shape (B, T, n_features) indicating observed data.
             mask_output (torch.Tensor)): same shape as X \in [0,1]
-            
+
         Returns:
             torch.Tensor: Perturbed output, shape (T, n_features).
         """
         super().apply(t=t, X=X, data_mask=data_mask, mask=mask, K=K, temp=temp)
-        
+
         mask_output = mask(t)
 
         if K > 1:
@@ -484,24 +513,27 @@ class Deletion(Perturbation_continuous):
         z = sample_hard_concrete(mask_output, temperature=temp)
 
         if delete_and_pad:
-            t_pert, X_pert, data_mask_pert = self.delete_and_fill_tail(t, X, data_mask, z)
+            t_pert, X_pert, data_mask_pert = self.delete_and_fill_tail(
+                t, X, data_mask, z
+            )
         else:
             t_pert, X_pert, data_mask_pert = self.adapt_data_mask(t, X, data_mask, z)
 
         return t_pert, X_pert, data_mask_pert
-    
+
 
 class GaussianBlur(Perturbation):
     """
     This class applies Gaussian blur perturbations to inputs using two masks:
       - `tensor_mask` is used to compute the Gaussian width (sigma) for each time point and feature.
       - `data_mask` is a binary mask (same shape as X) that indicates which data points to consider.
-    
+
     Attributes:
         eps (float): Small number for numerical stability.
         device: Device for tensor operations.
         sigma_max (float): Maximum width for the Gaussian blur.
     """
+
     def __init__(self, device, eps=1.0e-7, sigma_max=2):
         super().__init__(eps=eps, device=device)
         self.sigma_max = sigma_max
@@ -509,7 +541,7 @@ class GaussianBlur(Perturbation):
     def apply(self, t, X, data_mask, pert_mask, K=1, missing_value=0, temp=0.8):
         """
         Apply Gaussian blur to the input time series X.
-        
+
         Parameters:
             t (torch.Tensor): 1D tensor of time points, shape (T,).
             X (torch.Tensor): Input data, shape (T, n_features).
@@ -519,76 +551,90 @@ class GaussianBlur(Perturbation):
             missing_value (float): Value to use for missing data points. Sometimes 0 is better, sometimes NaN.
                     We'll set this up so that the functions ignore the missing data but don't fail. Here,
                     torch.nan is convenient
-        
+
         Returns:
             torch.Tensor: Blurred version of X, shape (T, n_features).
         """
         T = X.shape[-2]
 
-        X[data_mask == 0] = missing_value  # Set ignored data points to the missing value.
+        X[data_mask == 0] = (
+            missing_value  # Set ignored data points to the missing value.
+        )
 
         # Ensure t and data_mask are on the correct device.
         t = t.to(self.device)
         data_mask = data_mask.to(self.device)
-        
+
         # Compute sigma per time point and feature using pert_mask.
         # A higher mask_tensor value will result in a smaller sigma (narrower Gaussian).
         if isinstance(pert_mask, MaskFunction):
-            sigma_tensor = self.sigma_max * ((1 + self.eps) - Func.sigmoid(pert_mask(t=t))) # shape: (T, n_features)
+            sigma_tensor = self.sigma_max * (
+                (1 + self.eps) - Func.sigmoid(pert_mask(t=t))
+            )  # shape: (T, n_features)
         else:
-            sigma_tensor = self.sigma_max * ((1 + self.eps) - pert_mask(t=t)) # shape: (T, n_features)
+            sigma_tensor = self.sigma_max * (
+                (1 + self.eps) - pert_mask(t=t)
+            )  # shape: (T, n_features)
 
-        sigma_tensor = sigma_tensor.unsqueeze(0)  # shape: (1, T, n_features) for broadcasting
-        
+        sigma_tensor = sigma_tensor.unsqueeze(
+            0
+        )  # shape: (1, T, n_features) for broadcasting
+
         # Create tensors for time differences using the provided time points.
         t1 = t.view(T, 1, 1)  # shape: (T, 1, 1)
         t2 = t.view(1, T, 1)  # shape: (1, T, 1)
         time_diff_squared = (t1 - t2) ** 2  # shape: (T, T, 1)
-        
+
         # Compute the Gaussian filter coefficients.
         # For each destination time point (index from t2) and for each source time point (index from t1),
         # the weight is based on the distance squared divided by the squared sigma.
-        filter_coefs = torch.exp(- time_diff_squared / (2 * (sigma_tensor ** 2)))  # shape: (T, T, n_features)
-        
+        filter_coefs = torch.exp(
+            -time_diff_squared / (2 * (sigma_tensor**2))
+        )  # shape: (T, T, n_features)
+
         # Normalize the coefficients along the source time dimension (dimension 0).
-        filter_coefs = filter_coefs / (torch.sum(filter_coefs, dim=1, keepdim=True) + self.eps)
-        
+        filter_coefs = filter_coefs / (
+            torch.sum(filter_coefs, dim=1, keepdim=True) + self.eps
+        )
+
         # Incorporate the data_mask: zero out contributions from data points to be ignored.
         # data_mask is expanded so that each source time point is multiplied by its corresponding mask value.
-        filter_coefs = filter_coefs * data_mask.unsqueeze(1)  # shape remains (T, T, n_features)
-        
+        filter_coefs = filter_coefs * data_mask.unsqueeze(
+            1
+        )  # shape remains (T, T, n_features)
+
         # Renormalize the coefficients after applying the data_mask.
         normalizer = torch.sum(filter_coefs, dim=1, keepdim=True) + self.eps
         filter_coefs = filter_coefs / normalizer
-        
+
         # Compute the blurred output using Einstein summation:
         # For each destination time point, sum over source time points (weighted by the filter coefficients).
         X_pert = torch.einsum("bsti,bsi->bti", filter_coefs, X)
         return t, X_pert, data_mask
-    
-    
+
 
 class FadeMovingAverage(Perturbation):
     """This class allows to create and apply 'fade to moving average' perturbations on inputs based on masks.
-    
+
     Attributes:
         eps (float): Small number used for numerical stability.
         device: Device on which the tensor operations are executed.
     """
+
     def __init__(self, device, eps=1.0e-7):
         super().__init__(eps=eps, device=device)
 
     def apply(self, t, X, data_mask, pert_mask, K=1, temp=0.8):
         """
         Apply the fade-to-moving-average perturbation to a single time series.
-        
+
         Parameters:
             t (torch.Tensor): 1D tensor of time stamps, shape (T,).
             X (torch.Tensor): Input data, shape (T, n_features).
             data_mask (torch.Tensor): Binary mask of shape (T, n_features) indicating observed data.
             pert_mask (torch.Tensor or nn.Module):
             K (int): Number of samples to generate (not used here, included for consistency).
-            
+
         Returns:
             torch.Tensor: Perturbed output, shape (T, n_features).
         """
@@ -598,15 +644,19 @@ class FadeMovingAverage(Perturbation):
 
         # Compute the moving average per feature using data_mask.
         # Only the observed points (where data_mask == 1) contribute.
-        moving_avg = torch.sum(X * data_mask, dim=-2) / (torch.sum(data_mask, dim=-2) + self.eps)
+        moving_avg = torch.sum(X * data_mask, dim=-2) / (
+            torch.sum(data_mask, dim=-2) + self.eps
+        )
         # Tile the moving average to the same time dimension as X.
         moving_average_tiled = moving_avg.view(1, -1).repeat(T, 1).to(self.device)
         # The perturbation is an affine blend of the original input and its moving average.
-        
+
         if isinstance(pert_mask, MaskFunction):
-            
-            X_pert = Func.sigmoid(pert_mask(t=t)) * X + (1 - Func.sigmoid(pert_mask(t=t))) * moving_average_tiled
+            X_pert = (
+                Func.sigmoid(pert_mask(t=t)) * X
+                + (1 - Func.sigmoid(pert_mask(t=t))) * moving_average_tiled
+            )
         else:
             X_pert = pert_mask(t=t) * X + (1 - pert_mask(t=t)) * moving_average_tiled
-        
+
         return t, X_pert, data_mask
