@@ -36,7 +36,7 @@
 | `tests/models/test_diffusion_transformer.py` | **Create** | Model forward pass tests |
 | `tests/training/test_schedule.py` | **Create** | DDPM schedule tests |
 | `tests/training/test_loops.py` | **Create** | Pretrain/finetune loop tests |
-| `tests/test_attribution.py` | **Create** | `forward_func` K>1 path test |
+| `tests/test_attribution.py` | **Create** | `forward_func` K>1 path test + odds-change tests |
 | `pyproject.toml` | **Modify** | Add `scikit-learn`, `pandas`, `pytest` deps |
 | `checkpoints/` | **Create dir** | Saved model weights |
 
@@ -1653,3 +1653,99 @@ print('Attribution smoke test passed.')
 ```
 
 Expected: `Mask shape: torch.Size([1, 72, 39])` then `Attribution smoke test passed.`
+
+---
+
+## Task 12: Odds-change metrics
+
+**Files:**
+- Modify: `sepsis_attribution.py` (replace `compute_del_odds_change` and `compute_imp_odds_change` stubs)
+- Test: `tests/test_attribution.py` (5 tests already written, currently failing with `NotImplementedError`)
+
+**Background:** The paper reports average change in log-odds as the primary attribution quality metric.
+- **Del odds change** — apply the attribution mask as Deletion: zero both `X` and `data_mask` where `mask=0`. The transformer treats deleted positions as never observed. Metric: `mean(logit_del - logit_orig)` over the batch.
+- **Imp odds change** — apply the attribution mask as Imputation: zero `X` where `mask=0` but leave `data_mask` unchanged. Since features are z-score normalised, 0 equals the feature mean. Metric: `mean(logit_imp - logit_orig)` over the batch.
+
+The two metrics are semantically distinct: Del changes the attention pattern (transformer ignores fully-deleted timesteps); Imp only changes feature values while the transformer's view of which timesteps exist stays the same.
+
+- [ ] **Step 1: Confirm the failing tests**
+
+```bash
+uv run python -m pytest tests/test_attribution.py -k "odds" -v
+```
+
+Expected: 5 tests collected, all FAILED with `NotImplementedError`.
+
+- [ ] **Step 2: Implement the two functions in `sepsis_attribution.py`**
+
+Replace the two stub functions (lines 63–68 of the current file) with:
+
+```python
+@torch.no_grad()
+def compute_del_odds_change(
+    model: nn.Module,
+    t: torch.Tensor,
+    X: torch.Tensor,
+    data_mask: torch.Tensor,
+    mask: torch.Tensor,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """Average change in log-odds when the attribution mask is applied as Deletion.
+
+    Del zeros both X and data_mask where mask=0 — the transformer treats those
+    positions as never observed.  Returns mean(logit_del - logit_orig) as a scalar.
+    """
+    model = model.to(device).eval()
+    t, X, data_mask, mask = (
+        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+    )
+    logit_orig = model.classify(t, X, data_mask).squeeze(-1)          # (B,)
+    logit_del = model.classify(t, X * mask, data_mask * mask).squeeze(-1)  # (B,)
+    return (logit_del - logit_orig).mean()
+
+
+@torch.no_grad()
+def compute_imp_odds_change(
+    model: nn.Module,
+    t: torch.Tensor,
+    X: torch.Tensor,
+    data_mask: torch.Tensor,
+    mask: torch.Tensor,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """Average change in log-odds when the attribution mask is applied as Imputation.
+
+    Imp zeros X where mask=0 (inserting the feature mean in z-score space) but
+    leaves data_mask unchanged.  Returns mean(logit_imp - logit_orig) as a scalar.
+    """
+    model = model.to(device).eval()
+    t, X, data_mask, mask = (
+        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+    )
+    logit_orig = model.classify(t, X, data_mask).squeeze(-1)            # (B,)
+    logit_imp = model.classify(t, X * mask, data_mask).squeeze(-1)      # (B,)
+    return (logit_imp - logit_orig).mean()
+```
+
+- [ ] **Step 3: Run the odds-change tests**
+
+```bash
+uv run python -m pytest tests/test_attribution.py -k "odds" -v
+```
+
+Expected: 5 tests pass.
+
+- [ ] **Step 4: Run the full test suite**
+
+```bash
+uv run python -m pytest tests/ -v
+```
+
+Expected: 39 passed, 0 failed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add sepsis_attribution.py
+git commit -m "feat: implement compute_del_odds_change and compute_imp_odds_change"
+```

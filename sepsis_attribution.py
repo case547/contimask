@@ -60,12 +60,60 @@ def make_forward_func(model: nn.Module, device: str = "cpu") -> Callable:
     return forward_func
 
 
-def compute_del_odds_change(*args, **kwargs):
-    raise NotImplementedError
+@torch.no_grad()
+def compute_del_odds_change(
+    model: nn.Module,
+    t: torch.Tensor,
+    X: torch.Tensor,
+    data_mask: torch.Tensor,
+    mask: torch.Tensor,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """Average change in log-odds when the attribution mask is applied as Deletion.
+
+    Del zeros both X and data_mask where mask=0 — the transformer treats those
+    positions as never observed.  Returns mean(logit_del - logit_orig) as a scalar.
+    """
+    was_training = model.training
+    model = model.to(device).eval()
+    t, X, data_mask, mask = (
+        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+    )
+    try:
+        logit_orig = model.classify(t, X, data_mask).squeeze(-1)          # (B,)
+        logit_del = model.classify(t, X * mask, data_mask * mask).squeeze(-1)  # (B,)
+        return (logit_del - logit_orig).mean()
+    finally:
+        if was_training:
+            model.train()
 
 
-def compute_imp_odds_change(*args, **kwargs):
-    raise NotImplementedError
+@torch.no_grad()
+def compute_imp_odds_change(
+    model: nn.Module,
+    t: torch.Tensor,
+    X: torch.Tensor,
+    data_mask: torch.Tensor,
+    mask: torch.Tensor,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """Average change in log-odds when the attribution mask is applied as Imputation.
+
+    Imp zeros X where mask=0 (inserting the feature mean in z-score space) but
+    leaves data_mask unchanged.  Returns mean(logit_imp - logit_orig) as a scalar.
+    """
+    was_training = model.training
+    model = model.to(device).eval()
+    t, X, data_mask, mask = (
+        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+    )
+    try:
+        logit_orig = model.classify(t, X, data_mask).squeeze(-1)            # (B,)
+        logit_imp = model.classify(t, X * mask, data_mask).squeeze(-1)      # (B,)
+        return (logit_imp - logit_orig).mean()
+    finally:
+        if was_training:
+            model.train()
 
 
 def run_attribution(
