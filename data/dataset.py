@@ -11,16 +11,24 @@ from torch.utils.data import Dataset
 import config
 
 
+def _timestep_count(path: Path) -> int:
+    df = pd.read_csv(path, sep="|", usecols=["ICULOS"])
+    return int((df["ICULOS"] <= config.MAX_SEQ_LEN).sum())
+
+
 class SepsisDataset(Dataset):
     def __init__(
         self,
         data_dir: str | Path,
         psv_files: Optional[list] = None,
         norm_stats: Optional[dict] = None,
+        min_timesteps: int = 3,
     ):
         self.data_dir = Path(data_dir)
         if psv_files is None:
             psv_files = sorted(self.data_dir.glob("*.psv"))
+            if min_timesteps > 1:
+                psv_files = [f for f in psv_files if _timestep_count(f) >= min_timesteps]
         self.psv_files = list(psv_files)
         self.norm_stats = norm_stats
 

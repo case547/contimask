@@ -54,6 +54,14 @@ def test_static_features_observed_at_real_rows(mock_data_dir):
     assert data_mask[:50, 36].sum().item() == 0
 
 
+def test_short_patient_dropped(tmp_path):
+    from tests.conftest import _write_psv
+    _write_psv(tmp_path / "long.psv", n_rows=10)
+    _write_psv(tmp_path / "short.psv", n_rows=2)   # exactly 2 rows — should be dropped
+    ds = SepsisDataset(tmp_path)
+    assert len(ds) == 1
+
+
 def test_normalization_applied(mock_data_dir):
     ds_raw = SepsisDataset(mock_data_dir)
     from data.dataset import compute_norm_stats
