@@ -10,29 +10,31 @@ def stratified_patient_split(
     labels: list[int],
     val_frac: float = 0.15,
     test_frac: float = 0.15,
-    seed: int = 42,
 ) -> tuple[list[Path], list[Path], list[Path]]:
+    train_frac = 1.0 - val_frac - test_frac
+    # Split seeds from https://github.com/patrick-kidger/NeuralCDE/blob/master/experiments/datasets/common.py#L26
+
     try:
-        train_val_files, test_files, train_val_labels, _ = train_test_split(
-            psv_files, labels, test_size=test_frac, stratify=labels, random_state=seed
+        train_files, valtest_files, _, valtest_labels = train_test_split(
+            psv_files, labels, train_size=train_frac, stratify=labels, random_state=0
         )
     except ValueError:
-        train_val_files, test_files, train_val_labels, _ = train_test_split(
-            psv_files, labels, test_size=test_frac, random_state=seed
+        train_files, valtest_files, _, valtest_labels = train_test_split(
+            psv_files, labels, train_size=train_frac, random_state=0
         )
 
     try:
-        train_files, val_files = train_test_split(
-            train_val_files,
-            test_size=val_frac / (1.0 - test_frac),
-            stratify=train_val_labels,
-            random_state=seed,
+        val_files, test_files = train_test_split(
+            valtest_files,
+            test_size=test_frac / (val_frac + test_frac),
+            stratify=valtest_labels,
+            random_state=1,
         )
     except ValueError:
-        train_files, val_files = train_test_split(
-            train_val_files,
-            test_size=val_frac / (1.0 - test_frac),
-            random_state=seed,
+        val_files, test_files = train_test_split(
+            valtest_files,
+            test_size=test_frac / (val_frac + test_frac),
+            random_state=1,
         )
 
     return list(train_files), list(val_files), list(test_files)
