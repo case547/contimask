@@ -6,7 +6,7 @@
 
 **Architecture:** Transformer encoder with sinusoidal time embeddings and a learned CLS token, pretrained with a DDPM denoising objective then fine-tuned with BCE. All 39 features (34 time-varying + 5 static) are treated uniformly as a constant time series — static features repeat at every real timestep and are attributed over by ContiMask like any other feature.
 
-**Tech Stack:** Python 3.10, PyTorch 2.x, scikit-learn (stratified split + AUPRC), pandas (PSV loading), pytest, existing `utils/tools.py` (EarlyStopping), existing `attribution/` (ContiMask framework).
+**Tech Stack:** Python 3.10, PyTorch 2.x, scikit-learn (stratified split + AUC), pandas (PSV loading), pytest, existing `utils/tools.py` (EarlyStopping), existing `attribution/` (ContiMask framework).
 
 **Spec:** `docs/superpowers/specs/2026-05-18-sepsis-diffusiontransformer-option1-design.md`
 
@@ -258,7 +258,12 @@ python -m pytest tests/data/test_dataset.py -v 2>&1 | head -20
 
 Expected: `ModuleNotFoundError: No module named 'data'`
 
-- [ ] **Step 3: Implement `data/dataset.py`**
+- [x] **Step 3: Implement `data/dataset.py`**
+
+> **Deviations from original plan:**
+> - Windowing uses `df[df["ICULOS"] <= config.MAX_SEQ_LEN]` (value filter, as planned), but without the `min(len(...), MAX_SEQ_LEN)` cap — ICULOS filter alone is sufficient.
+> - Tensor construction uses `F.pad` rather than pre-allocation + slice assignment.
+> - Static feature broadcasting (copying row-0 value/mask to all real rows) was omitted. The PSV format already stores static features consistently across all rows, so no enforcement is needed.
 
 ```python
 from __future__ import annotations
@@ -268,6 +273,7 @@ from typing import Optional
 
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 import config
@@ -294,42 +300,24 @@ class SepsisDataset(Dataset):
 
         label = int(df["SepsisLabel"].any())
 
-        # Truncate to first MAX_SEQ_LEN rows
-        df_window = df[df["ICULOS"] <= config.MAX_SEQ_LEN].copy()
-        actual_len = min(len(df_window), config.MAX_SEQ_LEN)
+        rows = df[df["ICULOS"] <= config.MAX_SEQ_LEN]
+        n = len(rows)
+        pad = config.MAX_SEQ_LEN - n
 
-        # Time axis: ICULOS normalised to [0, 1]
-        t = torch.zeros(config.MAX_SEQ_LEN)
-        t[:actual_len] = torch.tensor(
-            df_window["ICULOS"].values[:actual_len].astype("float32")
-        ) / config.MAX_SEQ_LEN
+        t_real = torch.tensor(rows["ICULOS"].values, dtype=torch.float32) / config.MAX_SEQ_LEN
+        t = F.pad(t_real, (0, pad))
 
-        # Features and mask
-        feat_vals = df_window[config.FEATURE_COLS].values[:actual_len].astype("float32")
-        X = torch.zeros(config.MAX_SEQ_LEN, config.N_FEATURES)
-        data_mask = torch.zeros(config.MAX_SEQ_LEN, config.N_FEATURES)
-
-        feat_tensor = torch.tensor(feat_vals)
+        feat_tensor = torch.tensor(rows[config.FEATURE_COLS].values, dtype=torch.float32)
         observed = ~torch.isnan(feat_tensor)
-        data_mask[:actual_len] = observed.float()
-        feat_tensor = torch.nan_to_num(feat_tensor, nan=0.0)
-        X[:actual_len] = feat_tensor
-
-        # Static features are the same in every row; set data_mask based on first row
-        static_cols = slice(34, 39)
-        first_row_static_observed = observed[0, static_cols]  # (5,)
-        for row in range(actual_len):
-            data_mask[row, static_cols] = first_row_static_observed.float()
-        static_vals = feat_tensor[0, static_cols]
-        for row in range(actual_len):
-            X[row, static_cols] = static_vals
+        X = F.pad(torch.nan_to_num(feat_tensor, nan=0.0), (0, 0, 0, pad))
+        data_mask = F.pad(observed.float(), (0, 0, 0, pad))
 
         if self.norm_stats is not None:
             mean = self.norm_stats["mean"]
             std = self.norm_stats["std"]
             X = (X - mean) * data_mask
             X = X / std
-            X = X * data_mask  # re-zero positions masked out
+            X = X * data_mask
 
         return t, X, data_mask, torch.tensor(label, dtype=torch.float32)
 
@@ -1069,7 +1057,7 @@ Append to `tests/training/test_loops.py`:
 from training.finetune import finetune
 
 
-def test_finetune_returns_auprc(tmp_path):
+def test_finetune_returns_auc(tmp_path):
     model = DiffusionTransformer(
         d_model=16, n_heads=2, n_layers=2, ffn_dim=32,
         dropout=0.0, n_features=config.N_FEATURES,
@@ -1082,7 +1070,7 @@ def test_finetune_returns_auprc(tmp_path):
     dm = torch.ones(16, 72, config.N_FEATURES)
     ds = TensorDataset(t, X, dm, labels)
     loader = DataLoader(ds, batch_size=8)
-    auprc = finetune(
+    auc = finetune(
         model, loader, loader,
         lr_ratios=[1.0, 1.0, 1.0, 1.0],
         base_lr=1e-3,
@@ -1092,7 +1080,7 @@ def test_finetune_returns_auprc(tmp_path):
         checkpoint_path=str(tmp_path / "best.pt"),
         device="cpu",
     )
-    assert 0.0 <= auprc <= 1.0
+    assert 0.0 <= auc <= 1.0
 
 
 def test_finetune_saves_checkpoint(tmp_path):
@@ -1123,7 +1111,7 @@ def test_finetune_saves_checkpoint(tmp_path):
 - [ ] **Step 2: Run to confirm failure**
 
 ```bash
-python -m pytest tests/training/test_loops.py::test_finetune_returns_auprc -v 2>&1 | head -10
+python -m pytest tests/training/test_loops.py::test_finetune_returns_auc -v 2>&1 | head -10
 ```
 
 Expected: `ModuleNotFoundError: No module named 'training.finetune'`
@@ -1136,7 +1124,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 
 from utils.tools import EarlyStopping
@@ -1203,9 +1191,9 @@ def _evaluate(model: nn.Module, loader: DataLoader, device: str) -> float:
         all_labels.append(labels)
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
-    if labels.sum() == 0:
-        return 0.0
-    return float(average_precision_score(labels, preds))
+    if len(set(labels)) < 2:
+        return 0.5
+    return float(roc_auc_score(labels, preds))
 
 
 def finetune(
@@ -1232,20 +1220,20 @@ def finetune(
     optimizer = _build_optimizer(model, lr_ratios, base_lr, weight_decay)
     es = EarlyStopping(patience=patience, path=checkpoint_path, verbose=True)
 
-    best_auprc = 0.0
+    best_auc = 0.0
     for epoch in range(max_epochs):
         _finetune_epoch(model, train_loader, optimizer, pos_weight, grad_clip, device)
-        val_auprc = _evaluate(model, val_loader, device)
-        print(f"Finetune epoch {epoch+1}/{max_epochs}  val_auprc={val_auprc:.4f}")
-        es(-val_auprc)  # EarlyStopping minimises; negate so higher AUPRC = improvement
+        val_auc = _evaluate(model, val_loader, device)
+        print(f"Finetune epoch {epoch+1}/{max_epochs}  val_auc={val_auc:.4f}")
+        es(-val_auc)  # EarlyStopping minimises; negate so higher AUC = improvement
         if es.counter == 0:
-            es.save_checkpoint(-val_auprc, model)
-            best_auprc = val_auprc
+            es.save_checkpoint(-val_auc, model)
+            best_auc = val_auc
         if es.early_stop:
             print("Early stopping.")
             break
 
-    return best_auprc
+    return best_auc
 ```
 
 - [ ] **Step 4: Run tests**
@@ -1630,7 +1618,7 @@ python training/train.py \
   --checkpoint_dir checkpoints
 ```
 
-Expected: prints per-epoch loss/AUPRC, creates `checkpoints/pretrained_backbone.pt` and `checkpoints/best_model.pt`.
+Expected: prints per-epoch loss/AUC, creates `checkpoints/pretrained_backbone.pt` and `checkpoints/best_model.pt`.
 
 - [ ] **Step 5: Smoke-test attribution on one test patient**
 

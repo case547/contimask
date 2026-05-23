@@ -52,7 +52,7 @@ def test_pretrain_saves_checkpoint(tmp_path):
     assert (tmp_path / "pretrained.pt").exists()
 
 
-def test_finetune_returns_auprc(tmp_path):
+def test_finetune_returns_auc(tmp_path):
     model = DiffusionTransformer(
         d_model=16, n_heads=2, n_layers=2, ffn_dim=32,
         dropout=0.0, n_features=config.N_FEATURES,
@@ -65,7 +65,7 @@ def test_finetune_returns_auprc(tmp_path):
     dm = torch.ones(16, 72, config.N_FEATURES)
     ds = TensorDataset(t, X, dm, labels)
     loader = DataLoader(ds, batch_size=8)
-    auprc = finetune(
+    auc = finetune(
         model, loader, loader,
         lr_ratios=[1.0, 1.0, 1.0, 1.0],
         base_lr=1e-3,
@@ -75,7 +75,7 @@ def test_finetune_returns_auprc(tmp_path):
         checkpoint_path=str(tmp_path / "best.pt"),
         device="cpu",
     )
-    assert 0.0 <= auprc <= 1.0
+    assert 0.0 <= auc <= 1.0
 
 
 def test_finetune_saves_checkpoint(tmp_path):

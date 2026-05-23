@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 
 from utils.tools import EarlyStopping
@@ -69,9 +69,9 @@ def _evaluate(model: nn.Module, loader: DataLoader, device: str) -> float:
         all_labels.append(labels)
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
-    if labels.sum() == 0:
-        return 0.0
-    return float(average_precision_score(labels, preds))
+    if len(set(labels)) < 2:
+        return 0.5
+    return float(roc_auc_score(labels, preds))
 
 
 def finetune(
@@ -98,17 +98,17 @@ def finetune(
     optimizer = _build_optimizer(model, lr_ratios, base_lr, weight_decay)
     es = EarlyStopping(patience=patience, path=checkpoint_path, verbose=True)
 
-    best_auprc = 0.0
+    best_auc = 0.0
     for epoch in range(max_epochs):
         _finetune_epoch(model, train_loader, optimizer, pos_weight, grad_clip, device)
-        val_auprc = _evaluate(model, val_loader, device)
-        print(f"Finetune epoch {epoch+1}/{max_epochs}  val_auprc={val_auprc:.4f}")
-        es(-val_auprc)  # EarlyStopping minimises; negate AUPRC so higher = better
+        val_auc = _evaluate(model, val_loader, device)
+        print(f"Finetune epoch {epoch+1}/{max_epochs}  val_auc={val_auc:.4f}")
+        es(-val_auc)  # EarlyStopping minimises; negate AUC so higher = better
         if es.counter == 0:
-            es.save_checkpoint(-val_auprc, model)
-            best_auprc = val_auprc
+            es.save_checkpoint(-val_auc, model)
+            best_auc = val_auc
         if es.early_stop:
             print("Early stopping.")
             break
 
-    return best_auprc
+    return best_auc
