@@ -33,9 +33,13 @@ def build_loaders(data_dir: str, checkpoint_dir: Path):
     labels = [int(raw_ds[i][3].item()) for i in range(len(raw_ds))]
     train_files, val_files, _ = stratified_patient_split(raw_ds.psv_files, labels)
 
-    train_ds_raw = SepsisDataset(data_dir, psv_files=train_files)
-    norm_stats = compute_norm_stats(train_ds_raw)
-    torch.save(norm_stats, checkpoint_dir / "norm_stats.pt")
+    norm_stats_path = checkpoint_dir / "norm_stats.pt"
+    if norm_stats_path.exists():
+        norm_stats = torch.load(norm_stats_path, map_location="cpu")
+    else:
+        train_ds_raw = SepsisDataset(data_dir, psv_files=train_files)
+        norm_stats = compute_norm_stats(train_ds_raw)
+        torch.save(norm_stats, norm_stats_path)
 
     train_ds = SepsisDataset(data_dir, psv_files=train_files, norm_stats=norm_stats)
     val_ds = SepsisDataset(data_dir, psv_files=val_files, norm_stats=norm_stats)
