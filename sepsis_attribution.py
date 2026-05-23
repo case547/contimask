@@ -184,7 +184,7 @@ def run_attribution(
         lambda_l1=lambda_l1,
         lambda_tv=lambda_tv,
         target_area=target_area,
-        optimization_strategy="gradient",
+        optimization_strategy="evotorch",
     )
 
     with torch.no_grad():
