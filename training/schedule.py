@@ -19,7 +19,7 @@ class DDPMSchedule:
         x0: (B, T_seq, F) clean normalised features
         s:  (B,) diffusion step indices in [0, T_diff)
         data_mask: (B, T_seq, F) binary, 1 where observed
-        Returns (x_noisy, eps) — noise only applied to observed positions
+        Returns (x_noisy, eps) -- noise only applied to observed positions
         """
         B = x0.shape[0]
         device = x0.device
