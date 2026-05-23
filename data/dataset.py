@@ -32,22 +32,25 @@ class SepsisDataset(Dataset):
 
         label = int(df["SepsisLabel"].any())
 
-        # Truncate to first MAX_SEQ_LEN rows
-        rows = df.iloc[: config.MAX_SEQ_LEN]
+        # Truncate to first MAX_SEQ_LEN hours (filter by ICULOS value, not row count)
+        rows = df[df["ICULOS"] <= config.MAX_SEQ_LEN]
         n = len(rows)
 
         pad = config.MAX_SEQ_LEN - n
 
         # Time axis: ICULOS normalised to [0, 1]
-        t_real = torch.tensor(rows["ICULOS"].values, dtype=torch.float32) / config.MAX_SEQ_LEN
+        t_real = (
+            torch.tensor(rows["ICULOS"].values, dtype=torch.float32)
+            / config.MAX_SEQ_LEN
+        )
         t = F.pad(t_real, (0, pad))
 
-        # Features and mask — pad tail rows with zeros
-        feat_tensor = torch.tensor(
+        # Features and mask - pad tail rows with zeros
+        feature_tensor = torch.tensor(
             rows[config.FEATURE_COLS].values, dtype=torch.float32
         )
-        observed = ~torch.isnan(feat_tensor)
-        X = F.pad(torch.nan_to_num(feat_tensor, nan=0.0), (0, 0, 0, pad))
+        observed = ~torch.isnan(feature_tensor)
+        X = F.pad(torch.nan_to_num(feature_tensor, nan=0.0), (0, 0, 0, pad))
         data_mask = F.pad(observed.float(), (0, 0, 0, pad))
 
         if self.norm_stats is not None:
@@ -67,8 +70,8 @@ def compute_norm_stats(dataset: SepsisDataset) -> dict:
         _, X, data_mask, _ = dataset[idx]
         all_X.append(X)
         all_mask.append(data_mask)
-    all_X = torch.stack(all_X)       # (N, T, F)
-    all_mask = torch.stack(all_mask) # (N, T, F)
+    all_X = torch.stack(all_X)  # (N, T, F)
+    all_mask = torch.stack(all_mask)  # (N, T, F)
     denom = all_mask.sum(dim=(0, 1)).clamp(min=1.0)
     mean = (all_X * all_mask).sum(dim=(0, 1)) / denom
     sq_diff = ((all_X - mean) ** 2) * all_mask
