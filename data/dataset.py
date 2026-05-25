@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import torch
@@ -11,24 +10,41 @@ from torch.utils.data import Dataset
 import config
 
 
-def _timestep_count(path: Path) -> int:
-    df = pd.read_csv(path, sep="|", usecols=["ICULOS"])
-    return int((df["ICULOS"] <= config.MAX_SEQ_LEN).sum())
+def _patient_meta(path: Path) -> tuple[int, int]:
+    """Return (n_timesteps_within_window, binary_label) for a PSV file."""
+    df = pd.read_csv(path, sep="|", usecols=["ICULOS", "SepsisLabel"])
+    n = int((df["ICULOS"] <= config.MAX_SEQ_LEN).sum())
+    label = int(df["SepsisLabel"].any())
+    return n, label
 
 
 class SepsisDataset(Dataset):
     def __init__(
         self,
         data_dir: str | Path,
-        psv_files: Optional[list] = None,
-        norm_stats: Optional[dict] = None,
+        psv_files: list[Path] | None = None,
+        norm_stats: dict[str, torch.Tensor] | None = None,
         min_timesteps: int = 3,
     ):
         self.data_dir = Path(data_dir)
         if psv_files is None:
             psv_files = sorted(self.data_dir.glob("*.psv"))
+            meta = [_patient_meta(f) for f in psv_files]
             if min_timesteps > 1:
-                psv_files = [f for f in psv_files if _timestep_count(f) >= min_timesteps]
+                psv_files = [
+                    f for f, (n, _) in zip(psv_files, meta) if n >= min_timesteps
+                ]
+                meta = [(n, label) for n, label in meta if n >= min_timesteps]
+            self.labels: list[int] = [label for _, label in meta]
+        else:
+            self.labels = [
+                int(
+                    pd.read_csv(f, sep="|", usecols=["SepsisLabel"])[
+                        "SepsisLabel"
+                    ].any()
+                )
+                for f in psv_files
+            ]
         self.psv_files = list(psv_files)
         self.norm_stats = norm_stats
 
@@ -71,17 +87,19 @@ class SepsisDataset(Dataset):
         return t, X, data_mask, torch.tensor(label, dtype=torch.float32)
 
 
-def compute_norm_stats(dataset: SepsisDataset) -> dict:
-    all_X = []
-    all_mask = []
+def compute_norm_stats(dataset: SepsisDataset) -> dict[str, torch.Tensor]:
+    count = torch.zeros(config.N_FEATURES)
+    total = torch.zeros(config.N_FEATURES)
     for idx in range(len(dataset)):
         _, X, data_mask, _ = dataset[idx]
-        all_X.append(X)
-        all_mask.append(data_mask)
-    all_X = torch.stack(all_X)  # (N, T, F)
-    all_mask = torch.stack(all_mask)  # (N, T, F)
-    denom = all_mask.sum(dim=(0, 1)).clamp(min=1.0)
-    mean = (all_X * all_mask).sum(dim=(0, 1)) / denom
-    sq_diff = ((all_X - mean) ** 2) * all_mask
-    std = torch.sqrt(sq_diff.sum(dim=(0, 1)) / denom).clamp(min=1e-6)
+        count += data_mask.sum(dim=0)           # (F,)
+        total += (X * data_mask).sum(dim=0)     # (F,)
+    mean = total / count.clamp(min=1.0)
+
+    sq_diff = torch.zeros(config.N_FEATURES)
+    for idx in range(len(dataset)):
+        _, X, data_mask, _ = dataset[idx]
+        sq_diff += (((X - mean) ** 2) * data_mask).sum(dim=0)
+    std = torch.sqrt(sq_diff / count.clamp(min=1.0)).clamp(min=1e-6)
+
     return {"mean": mean, "std": std}

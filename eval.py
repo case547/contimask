@@ -15,24 +15,27 @@ from training.train import build_model
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="~/msc_ai/individual-project/sepsis_data/training_setA")
+    parser.add_argument("--data_dir", default="~/msc_ai/individual-project/sepsis_data")
     parser.add_argument("--checkpoint_dir", default="checkpoints")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir)
     data_dir = str(Path(args.data_dir).expanduser())
 
     raw_ds = SepsisDataset(data_dir)
-    labels = [int(raw_ds[i][3].item()) for i in range(len(raw_ds))]
-    _, _, test_files = stratified_patient_split(raw_ds.psv_files, labels)
+    _, _, test_files = stratified_patient_split(raw_ds.psv_files, raw_ds.labels)
 
     norm_stats = torch.load(checkpoint_dir / "norm_stats.pt", map_location="cpu")
     test_ds = SepsisDataset(data_dir, psv_files=test_files, norm_stats=norm_stats)
     test_loader = DataLoader(test_ds, batch_size=config.BATCH_SIZE)
 
     model = build_model()
-    model.load_state_dict(torch.load(checkpoint_dir / "best_model.pt", map_location="cpu"))
+    model.load_state_dict(
+        torch.load(checkpoint_dir / "best_model.pt", map_location="cpu")
+    )
     model.to(args.device)
 
     auc = _evaluate(model, test_loader, args.device)

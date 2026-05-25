@@ -30,19 +30,20 @@ def build_model() -> DiffusionTransformer:
 
 def build_loaders(data_dir: str, checkpoint_dir: Path):
     raw_ds = SepsisDataset(data_dir)
-    labels = [int(raw_ds[i][3].item()) for i in range(len(raw_ds))]
-    train_files, val_files, _ = stratified_patient_split(raw_ds.psv_files, labels)
+    train_files, val_files, _ = stratified_patient_split(
+        raw_ds.psv_files, raw_ds.labels
+    )
 
     norm_stats_path = checkpoint_dir / "norm_stats.pt"
+    train_ds = SepsisDataset(data_dir, train_files)
     if norm_stats_path.exists():
         norm_stats = torch.load(norm_stats_path, map_location="cpu")
     else:
-        train_ds_raw = SepsisDataset(data_dir, psv_files=train_files)
-        norm_stats = compute_norm_stats(train_ds_raw)
+        norm_stats = compute_norm_stats(train_ds)
         torch.save(norm_stats, norm_stats_path)
+    train_ds.norm_stats = norm_stats
 
-    train_ds = SepsisDataset(data_dir, psv_files=train_files, norm_stats=norm_stats)
-    val_ds = SepsisDataset(data_dir, psv_files=val_files, norm_stats=norm_stats)
+    val_ds = SepsisDataset(data_dir, val_files, norm_stats)
 
     train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE)
@@ -51,11 +52,15 @@ def build_loaders(data_dir: str, checkpoint_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=["pretrain", "finetune", "both"], default="both")
-    parser.add_argument("--data_dir", default="~/msc_ai/individual-project/sepsis_data/training_setA")
+    parser.add_argument(
+        "--phase", choices=["pretrain", "finetune", "both"], default="both"
+    )
+    parser.add_argument("--data_dir", default="~/msc_ai/individual-project/sepsis_data")
     parser.add_argument("--checkpoint_dir", default="checkpoints")
     parser.add_argument("--pretrain_epochs", type=int, default=config.PRETRAIN_EPOCHS)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir)
@@ -71,7 +76,10 @@ def main():
     if args.phase in ("pretrain", "both"):
         schedule = DDPMSchedule(T=config.T_DIFF)
         pretrain(
-            model, train_loader, val_loader, schedule,
+            model,
+            train_loader,
+            val_loader,
+            schedule,
             max_epochs=args.pretrain_epochs,
             lr=config.PRETRAIN_LR,
             patience=config.EARLY_STOPPING_PATIENCE,
@@ -85,7 +93,9 @@ def main():
             model.load_state_dict(torch.load(pretrain_ckpt, map_location="cpu"))
             print(f"Loaded pretrained weights from {pretrain_ckpt}")
         finetune(
-            model, train_loader, val_loader,
+            model,
+            train_loader,
+            val_loader,
             lr_ratios=config.FINETUNE_LR_RATIOS,
             base_lr=config.FINETUNE_LR,
             weight_decay=config.WEIGHT_DECAY,

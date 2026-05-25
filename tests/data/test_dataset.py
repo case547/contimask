@@ -54,6 +54,12 @@ def test_static_features_observed_at_real_rows(mock_data_dir):
     assert data_mask[:50, 36].sum().item() == 0
 
 
+def test_labels_attribute(mock_data_dir):
+    ds = SepsisDataset(mock_data_dir)
+    assert len(ds.labels) == len(ds)
+    assert ds.labels == [0, 1, 0]  # p000001=no sepsis, p000002=sepsis, p000003=no sepsis
+
+
 def test_short_patient_dropped(tmp_path):
     from tests.conftest import _write_psv
     _write_psv(tmp_path / "long.psv", n_rows=10)
