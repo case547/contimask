@@ -123,6 +123,49 @@ def compute_imp_odds_change(
             model.train()
 
 
+@torch.no_grad()
+def subsample_mask(
+    mask: torch.Tensor,
+    data_mask: torch.Tensor,
+    target_area: float = config.MASK_TARGET_AREA,
+    seed: int | None = 42,
+) -> torch.Tensor:
+    """Randomly subsample active mask entries to exactly target_area of observed entries.
+
+    If the mask already covers <= target_area of observed entries, that batch item is
+    returned verbatim (mask=1 & data_mask=0 positions are preserved as-is). For items
+    that are subsampled, the output is built from scratch so mask=1 & data_mask=0
+    positions are zeroed.
+    """
+    gen = torch.Generator()
+    if seed is not None:
+        gen.manual_seed(seed)
+
+    B, T, F = mask.shape
+    out = mask.clone()
+
+    for b in range(B):
+        n_observed = int(data_mask[b].sum().item())
+        n_target = round(target_area * n_observed)
+
+        active_indices = (
+            (mask[b] * data_mask[b]).view(-1).nonzero(as_tuple=False).view(-1)
+        )  # shape: (n_active,)
+        n_active = len(active_indices)
+
+        if n_active <= n_target:
+            continue
+
+        perm = torch.randperm(n_active, generator=gen)
+        keep = active_indices[perm[:n_target]]
+
+        flat = torch.zeros(T * F, dtype=mask.dtype)
+        flat[keep] = 1.0
+        out[b] = flat.view(T, F)
+
+    return out
+
+
 def run_attribution(
     model: nn.Module,
     t: torch.Tensor,
@@ -137,6 +180,7 @@ def run_attribution(
     mask_hidden_dim: int = config.MASK_HIDDEN_DIM,
     mask_L: int = config.MASK_L,
     n_features: int = 39,
+    seed: int | None = 42,
     device: str = "cpu",
 ) -> tuple[ContiMask, torch.Tensor]:
     """Run ContiMask attribution for a batch of time series.
@@ -155,6 +199,8 @@ def run_attribution(
         mask_hidden_dim: Hidden dimension of the Fourier mask network.
         mask_L: Number of Fourier frequencies.
         n_features: Feature dimensionality (output channels of the mask net).
+        seed: Seed for the post-hoc random subsampling step; ``None`` for
+            non-deterministic behaviour.
         device: Compute device.
 
     Returns:
@@ -166,17 +212,12 @@ def run_attribution(
     """
     forward_func = make_forward_func(model, device=device)
 
-    pert_mask = MaskFunctionFourier(
-        hidden_dim=mask_hidden_dim, features=n_features, L=mask_L
-    )
+    pert_mask = MaskFunctionFourier(mask_hidden_dim, n_features, mask_L)
 
     perturbation_func = Deletion(device=device)
 
     explainer = ContiMask(
-        forward_func=forward_func,
-        perturbation_func=perturbation_func,
-        pert_mask=pert_mask,
-        device=device,
+        forward_func, perturbation_func, pert_mask=pert_mask, device=device
     )
 
     explainer.attribute(
@@ -196,5 +237,7 @@ def run_attribution(
 
     with torch.no_grad():
         mask_values = (explainer.pert_mask(t.to(device)) > 0.5).float().cpu()
-
+    mask_values = subsample_mask(
+        mask_values, data_mask.cpu(), target_area=target_area, seed=seed
+    )
     return explainer, mask_values
