@@ -9,6 +9,7 @@ from typing import Callable
 import torch
 import torch.nn as nn
 
+import config
 from attribution.mask_conti import ContiMask
 from attribution.perturbation_conti import Deletion, MaskFunctionFourier
 
@@ -77,10 +78,13 @@ def compute_del_odds_change(
     was_training = model.training
     model = model.to(device).eval()
     t, X, data_mask, mask = (
-        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+        t.to(device),
+        X.to(device),
+        data_mask.to(device),
+        mask.to(device),
     )
     try:
-        logit_orig = model.classify(t, X, data_mask).squeeze(-1)          # (B,)
+        logit_orig = model.classify(t, X, data_mask).squeeze(-1)  # (B,)
         logit_del = model.classify(t, X * mask, data_mask * mask).squeeze(-1)  # (B,)
         return (logit_del - logit_orig).mean()
     finally:
@@ -105,11 +109,14 @@ def compute_imp_odds_change(
     was_training = model.training
     model = model.to(device).eval()
     t, X, data_mask, mask = (
-        t.to(device), X.to(device), data_mask.to(device), mask.to(device)
+        t.to(device),
+        X.to(device),
+        data_mask.to(device),
+        mask.to(device),
     )
     try:
-        logit_orig = model.classify(t, X, data_mask).squeeze(-1)            # (B,)
-        logit_imp = model.classify(t, X * mask, data_mask).squeeze(-1)      # (B,)
+        logit_orig = model.classify(t, X, data_mask).squeeze(-1)  # (B,)
+        logit_imp = model.classify(t, X * mask, data_mask).squeeze(-1)  # (B,)
         return (logit_imp - logit_orig).mean()
     finally:
         if was_training:
@@ -121,14 +128,14 @@ def run_attribution(
     t: torch.Tensor,
     X: torch.Tensor,
     data_mask: torch.Tensor,
-    n_epoch: int = 200,
+    n_epoch: int = config.MASK_EPOCHS,
     K: int = 10,
     lr: float = 0.01,
     lambda_l1: float = 0.01,
     lambda_tv: float = 1.0,
-    target_area: float = 0.1,
-    mask_hidden_dim: int = 16,
-    mask_L: int = 12,
+    target_area: float = config.MASK_TARGET_AREA,
+    mask_hidden_dim: int = config.MASK_HIDDEN_DIM,
+    mask_L: int = config.MASK_L,
     n_features: int = 39,
     device: str = "cpu",
 ) -> tuple[ContiMask, torch.Tensor]:
@@ -160,9 +167,7 @@ def run_attribution(
     forward_func = make_forward_func(model, device=device)
 
     pert_mask = MaskFunctionFourier(
-        hidden_dim=mask_hidden_dim,
-        features=n_features,
-        L=mask_L,
+        hidden_dim=mask_hidden_dim, features=n_features, L=mask_L
     )
 
     perturbation_func = Deletion(device=device)
@@ -175,16 +180,18 @@ def run_attribution(
     )
 
     explainer.attribute(
-        t=t,
-        X=X,
-        data_mask=data_mask,
-        n_epoch=n_epoch,
-        lr=lr,
-        K=K,
-        lambda_l1=lambda_l1,
-        lambda_tv=lambda_tv,
+        t,
+        X,
+        data_mask,
+        n_epoch,
+        lr,
+        K,
+        lambda_l1,
+        lambda_tv,
+        popsize=config.PGPE_POP_SIZE,
         target_area=target_area,
         optimization_strategy="evotorch",
+        deletion_mode=True,
     )
 
     with torch.no_grad():

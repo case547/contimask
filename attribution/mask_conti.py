@@ -133,7 +133,7 @@ class ContiMask(nn.Module):
         center_learning_rate=0.5,
         stdev_learning_rate=0.2,
         target_area: float = None,
-        deletion_mode: str = False,
+        deletion_mode: bool = False,
     ) -> torch.Tensor:
 
         B, T, feat = X.shape

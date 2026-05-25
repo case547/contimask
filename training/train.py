@@ -99,7 +99,7 @@ def main():
             lr_ratios=config.FINETUNE_LR_RATIOS,
             base_lr=config.FINETUNE_LR,
             weight_decay=config.WEIGHT_DECAY,
-            max_epochs=200,
+            max_epochs=config.FINETUNE_MAX_EPOCHS,
             patience=config.EARLY_STOPPING_PATIENCE,
             checkpoint_path=str(finetune_ckpt),
             grad_clip=config.GRAD_CLIP,
