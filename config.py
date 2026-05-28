@@ -15,10 +15,10 @@ PRETRAIN_LR = 1e-4
 FINETUNE_LR = 1e-3
 WEIGHT_DECAY = 0.01
 GRAD_CLIP = 1.0
-PRETRAIN_EPOCHS = 20
+PRETRAIN_MAX_EPOCHS = 100
 EARLY_STOPPING_PATIENCE = 10
 FINETUNE_MAX_EPOCHS = 200
-FINETUNE_LR_RATIOS = [0.1, 0.3, 0.7, 1.0]  # per transformer layer; 0.0 = frozen
+FINETUNE_LR_RATIOS = [0.25, 0.5, 0.75, 1.0]  # per transformer layer; 0.0 = frozen
 
 # ContiMask attribution
 MASK_HIDDEN_DIM = 16

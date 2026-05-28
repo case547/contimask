@@ -67,7 +67,9 @@ def main():
     )
     parser.add_argument("--data_dir", default="~/msc_ai/individual-project/sepsis_data")
     parser.add_argument("--checkpoint_dir", default="checkpoints")
-    parser.add_argument("--pretrain_epochs", type=int, default=config.PRETRAIN_EPOCHS)
+    parser.add_argument(
+        "--pretrain_epochs", type=int, default=config.PRETRAIN_MAX_EPOCHS
+    )
     parser.add_argument(
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )

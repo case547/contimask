@@ -110,7 +110,7 @@ def finetune(
 
     optimizer = _build_optimizer(model, lr_ratios, base_lr, weight_decay)
     es = EarlyStopping(
-        patience=patience, path=checkpoint_path, verbose=True, trace_func=logger.info
+        patience, path=checkpoint_path, verbose=True, trace_func=logger.info
     )
 
     best_auc = 0.0
