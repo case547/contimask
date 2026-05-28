@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import torch
@@ -13,6 +14,9 @@ from models.diffusion_transformer import DiffusionTransformer
 from training.finetune import finetune
 from training.pretrain import pretrain
 from training.schedule import DDPMSchedule
+from utils.tools import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def build_model() -> DiffusionTransformer:
@@ -37,13 +41,19 @@ def build_loaders(data_dir: str, checkpoint_dir: Path):
     norm_stats_path = checkpoint_dir / "norm_stats.pt"
     train_ds = SepsisDataset(data_dir, train_files)
     if norm_stats_path.exists():
+        logger.info("Norm stats: loaded from cache (%s)", norm_stats_path)
         norm_stats = torch.load(norm_stats_path, map_location="cpu")
     else:
+        logger.info(
+            "Norm stats: computing from %d training patients...", len(train_files)
+        )
         norm_stats = compute_norm_stats(train_ds)
         torch.save(norm_stats, norm_stats_path)
+        logger.info("Norm stats: saved to %s", norm_stats_path)
     train_ds.norm_stats = norm_stats
 
     val_ds = SepsisDataset(data_dir, val_files, norm_stats)
+    logger.info("Split: train=%d  val=%d patients", len(train_ds), len(val_ds))
 
     train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE)
@@ -65,6 +75,8 @@ def main():
 
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(exist_ok=True)
+    setup_logging(log_path=str(checkpoint_dir / "train.log"))
+    logger.info("Phase: %s  device: %s", args.phase, args.device)
 
     data_dir = str(Path(args.data_dir).expanduser())
     train_loader, val_loader = build_loaders(data_dir, checkpoint_dir)
@@ -91,12 +103,12 @@ def main():
     if args.phase in ("finetune", "both"):
         if pretrain_ckpt.exists() and args.phase == "finetune":
             model.load_state_dict(torch.load(pretrain_ckpt, map_location="cpu"))
-            print(f"Loaded pretrained weights from {pretrain_ckpt}")
+            logger.info("Loaded pretrained weights from %s", pretrain_ckpt)
         finetune(
             model,
             train_loader,
             val_loader,
-            lr_ratios=config.FINETUNE_LR_RATIOS,
+            config.FINETUNE_LR_RATIOS,
             base_lr=config.FINETUNE_LR,
             weight_decay=config.WEIGHT_DECAY,
             max_epochs=config.FINETUNE_MAX_EPOCHS,

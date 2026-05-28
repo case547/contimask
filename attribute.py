@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import time
 from pathlib import Path
 
 import torch
@@ -16,6 +18,9 @@ from sepsis_attribution import (
     run_attribution,
 )
 from training.train import build_model
+from utils.tools import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def _score_all(
@@ -38,21 +43,33 @@ def _run_group(
     device: str,
 ) -> tuple[list[float], list[float]]:
     del_vals, imp_vals = [], []
-    print(f"\nRunning attribution for {name}...")
+    logger.info("Running attribution for %s...", name)
+    t0 = time.perf_counter()
+
     for rank, idx in enumerate(indices.tolist()):
         t, X, dm, _ = test_ds[idx]
         t, X, dm = t.unsqueeze(0), X.unsqueeze(0), dm.unsqueeze(0)
 
+        t1 = time.perf_counter()
         _, mask = run_attribution(model, t, X, dm, device=device)
+        elapsed = time.perf_counter() - t1
 
         del_val = compute_del_odds_change(model, t, X, dm, mask, device=device).item()
         imp_val = compute_imp_odds_change(model, t, X, dm, mask, device=device).item()
 
         del_vals.append(del_val)
         imp_vals.append(imp_val)
-        print(
-            f"  [{rank + 1:3d}/100] prob={probs[idx]:.3f}  del={del_val:+.4f}  imp={imp_val:+.4f}"
+        logger.info(
+            "  [%3d/100] prob=%.3f  del=%+.4f  imp=%+.4f  (%.0fs)",
+            rank + 1,
+            probs[idx],
+            del_val,
+            imp_val,
+            elapsed,
         )
+
+    total_elapsed = time.perf_counter() - t0
+    logger.info("Finished %s attribution. Total time: %.1fs", name, total_elapsed)
 
     return del_vals, imp_vals
 
@@ -67,6 +84,8 @@ def main():
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir)
+    setup_logging(log_path=str(checkpoint_dir / "attribute.log"))
+    logger.info("Device: %s", args.device)
     data_dir = str(Path(args.data_dir).expanduser())
 
     model = build_model()
@@ -79,10 +98,10 @@ def main():
     _, _, test_files = stratified_patient_split(raw_ds.psv_files, raw_ds.labels)
 
     norm_stats = torch.load(checkpoint_dir / "norm_stats.pt", map_location="cpu")
-    test_ds = SepsisDataset(data_dir, psv_files=test_files, norm_stats=norm_stats)
+    test_ds = SepsisDataset(data_dir, test_files, norm_stats)
 
-    print(f"Scoring {len(test_ds)} test patients...")
-    probs = _score_all(model, test_ds, device=args.device)
+    logger.info("Test set: %d patients. Scoring...", len(test_ds))
+    probs = _score_all(model, test_ds, args.device)
 
     sorted_idx = probs.argsort(descending=True)
     top_idx = sorted_idx[:100]
@@ -100,11 +119,11 @@ def main():
         args.device,
     )
 
-    print("\n=== Odds-change results ===")
-    print(f"Del odds change  |  top 100:    {sum(del_top) / len(del_top):+.4f}")
-    print(f"Del odds change  |  bottom 100: {sum(del_bot) / len(del_bot):+.4f}")
-    print(f"Imp odds change  |  top 100:    {sum(imp_top) / len(imp_top):+.4f}")
-    print(f"Imp odds change  |  bottom 100: {sum(imp_bot) / len(imp_bot):+.4f}")
+    logger.info("=== Odds-change results ===")
+    logger.info("Del odds change  |  top 100:    %+.4f", sum(del_top) / len(del_top))
+    logger.info("Del odds change  |  bottom 100: %+.4f", sum(del_bot) / len(del_bot))
+    logger.info("Imp odds change  |  top 100:    %+.4f", sum(imp_top) / len(imp_top))
+    logger.info("Imp odds change  |  bottom 100: %+.4f", sum(imp_bot) / len(imp_bot))
 
 
 if __name__ == "__main__":

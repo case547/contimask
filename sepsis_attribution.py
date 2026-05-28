@@ -4,6 +4,7 @@ Sepsis attribution utilities: forward_func wrapper and ContiMask runner.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import torch
@@ -12,6 +13,8 @@ import torch.nn as nn
 import config
 from attribution.mask_conti import ContiMask
 from attribution.perturbation_conti import Deletion, MaskFunctionFourier
+
+logger = logging.getLogger(__name__)
 
 
 def make_forward_func(model: nn.Module, device: str = "cpu") -> Callable:
@@ -210,6 +213,13 @@ def run_attribution(
         * ``mask_values`` is a ``(B, T, F)`` float tensor of mask values in [0, 1]
           evaluated at the input time points.
     """
+    logger.debug(
+        "run_attribution: n_epoch=%d  K=%d  target_area=%.2f  device=%s",
+        n_epoch,
+        K,
+        target_area,
+        device,
+    )
     forward_func = make_forward_func(model, device=device)
 
     pert_mask = MaskFunctionFourier(mask_hidden_dim, n_features, mask_L)
@@ -237,7 +247,5 @@ def run_attribution(
 
     with torch.no_grad():
         mask_values = (explainer.pert_mask(t.to(device)) > 0.5).float().cpu()
-    mask_values = subsample_mask(
-        mask_values, data_mask.cpu(), target_area=target_area, seed=seed
-    )
+    mask_values = subsample_mask(mask_values, data_mask.cpu(), target_area, seed)
     return explainer, mask_values

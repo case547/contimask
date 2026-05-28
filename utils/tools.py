@@ -1,3 +1,4 @@
+import logging
 import pickle as pkl
 
 import matplotlib.pyplot as plt
@@ -196,6 +197,16 @@ def plot_example_box(input_arrays, cur_id=0, save_location=None, k=8):
     plt.close()
 
 
+def setup_logging(log_path: str | None = None, level: int = logging.INFO) -> None:
+    fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_path is not None:
+        handlers.append(logging.FileHandler(log_path, mode="a"))
+    logging.basicConfig(
+        level=level, format=fmt, datefmt="%Y-%m-%d %H:%M:%S", handlers=handlers
+    )
+
+
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
 
@@ -221,6 +232,7 @@ class EarlyStopping:
         self.best_score = None
         self.early_stop = False
         self.val_loss_min = np.Inf
+        self.best_epoch = None
         self.delta = delta
         self.path = path
         self.trace_func = trace_func
@@ -242,11 +254,12 @@ class EarlyStopping:
             self.best_score = score
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
-        """Saves model when validation loss decrease."""
+    def save_checkpoint(self, val_loss, model, epoch: int | None = None):
+        """Save model when validation loss decreases."""
         if self.verbose:
             self.trace_func(
-                f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ..."
+                f"Validation loss decreased after epoch {epoch} ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model..."
             )
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
+        self.best_epoch = epoch

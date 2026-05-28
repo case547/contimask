@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import torch
@@ -11,6 +12,9 @@ from data.dataset import SepsisDataset
 from data.split import stratified_patient_split
 from training.finetune import _evaluate
 from training.train import build_model
+from utils.tools import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -23,6 +27,7 @@ def main():
     args = parser.parse_args()
 
     checkpoint_dir = Path(args.checkpoint_dir)
+    setup_logging(log_path=str(checkpoint_dir / "eval.log"))
     data_dir = str(Path(args.data_dir).expanduser())
 
     raw_ds = SepsisDataset(data_dir)
@@ -30,6 +35,7 @@ def main():
 
     norm_stats = torch.load(checkpoint_dir / "norm_stats.pt", map_location="cpu")
     test_ds = SepsisDataset(data_dir, psv_files=test_files, norm_stats=norm_stats)
+    logger.info("Test set: %d patients  device: %s", len(test_ds), args.device)
     test_loader = DataLoader(test_ds, batch_size=config.BATCH_SIZE)
 
     model = build_model()
@@ -39,7 +45,7 @@ def main():
     model.to(args.device)
 
     auc = _evaluate(model, test_loader, args.device)
-    print(f"Test AUROC: {auc:.4f}")
+    logger.info("Test AUROC: %.4f", auc)
 
 
 if __name__ == "__main__":

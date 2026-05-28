@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,6 +9,8 @@ from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 
 from utils.tools import EarlyStopping
+
+logger = logging.getLogger(__name__)
 
 
 def _build_optimizer(
@@ -28,7 +32,9 @@ def _build_optimizer(
             for p in layer.parameters():
                 p.requires_grad_(False)
         else:
-            param_groups.append({"params": list(layer.parameters()), "lr": base_lr * ratio})
+            param_groups.append(
+                {"params": list(layer.parameters()), "lr": base_lr * ratio}
+            )
     param_groups.append({"params": list(model.cls_head.parameters()), "lr": base_lr})
     return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
 
@@ -94,21 +100,42 @@ def finetune(
     n_pos = all_labels.sum().item()
     n_neg = len(all_labels) - n_pos
     pos_weight = torch.tensor([n_neg / max(n_pos, 1)])
+    logger.info(
+        "Finetune: n_pos=%d  n_neg=%d  pos_weight=%.2f  device=%s",
+        int(n_pos),
+        int(n_neg),
+        pos_weight.item(),
+        device,
+    )
 
     optimizer = _build_optimizer(model, lr_ratios, base_lr, weight_decay)
-    es = EarlyStopping(patience=patience, path=checkpoint_path, verbose=True)
+    es = EarlyStopping(
+        patience=patience, path=checkpoint_path, verbose=True, trace_func=logger.info
+    )
 
     best_auc = 0.0
-    for epoch in range(max_epochs):
-        _finetune_epoch(model, train_loader, optimizer, pos_weight, grad_clip, device)
+    for epoch in range(1, max_epochs + 1):
+        train_loss = _finetune_epoch(
+            model, train_loader, optimizer, pos_weight, grad_clip, device
+        )
         val_auc = _evaluate(model, val_loader, device)
-        print(f"Finetune epoch {epoch+1}/{max_epochs}  val_auc={val_auc:.4f}")
+        logger.info(
+            "Finetune epoch %d/%d  train=%.4f  val_auc=%.4f",
+            epoch,
+            max_epochs,
+            train_loss,
+            val_auc,
+        )
+
         es(-val_auc)  # EarlyStopping minimises; negate AUC so higher = better
         if es.counter == 0:
-            es.save_checkpoint(-val_auc, model)
+            es.save_checkpoint(-val_auc, model, epoch)
             best_auc = val_auc
         if es.early_stop:
-            print("Early stopping.")
+            logger.info("Early stopping.")
             break
 
+    logger.info(
+        "Finetune done. Best val AUC: %.4f @ epoch %d.", best_auc, es.best_epoch
+    )
     return best_auc
